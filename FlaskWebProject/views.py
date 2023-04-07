@@ -12,7 +12,6 @@ from flask_login import current_user, login_user, logout_user, login_required
 from FlaskWebProject.models import User, Post
 import msal
 import uuid
-from msal import ConfidentialClientApplication
 
 imageSourceUrl = 'https://'+ app.config['BLOB_ACCOUNT']  + '.blob.core.windows.net/' + app.config['BLOB_CONTAINER']  + '/'
 
@@ -88,10 +87,9 @@ def authorized():
         cache = _load_cache()
         # Acquire a token from a built msal app, along with the appropriate redirect URI
         result = _build_msal_app(cache=cache).acquire_token_by_authorization_code(
-            request.args['code'],
+            code=request.args['code'],
             scopes=Config.SCOPE,
-            redirect_uri=url_for('authorized', _external=True, _scheme='https')
-        )
+            redirect_uri=url_for('authorized', _external=True, _scheme="https"))
         if "error" in result:
             return render_template("auth_error.html", result=result)
         session["user"] = result.get("id_token_claims")
@@ -118,39 +116,28 @@ def logout():
 def _load_cache():
     # Load the cache from `msal`, if it exists
     cache = msal.SerializableTokenCache()
-    if os.path.exists("my_app_cache.bin"):
-        with open("my_app_cache.bin", "rb") as cache_file:
-            cache.deserialize(cache_file.read())
+    token_cache = session.get('token_cache')
+    if token_cache:
+        cache.deserialize(token_cache)
     return cache
 
 def _save_cache(cache):
     # Save the cache, if it has changed
     if cache.has_state_changed:
-        with open("my_app_cache.bin", "wb") as cache_file:
-            cache_file.write(cache.serialize())
+        session['token_cache'] = cache.serialize()
 
-def _build_msal_app(cache=None, authority=None, **kwargs):
+def _build_msal_app(cache=None, authority=None):
     # Return a ConfidentialClientApplication
-    client_id = Config.CLIENT_ID
-    client_secret = Config.CLIENT_SECRET
-    authority = authority or Config.AUTHORITY
-
     return msal.ConfidentialClientApplication(
-        client_id=client_id,
-        client_credential=client_secret,
-        token_cache=cache,
-        authority=authority,
-        **kwargs
-    )
+        authority=authority or Config.AUTHORITY,
+        client_id=Config.CLIENT_ID,
+        client_credential=Config.CLIENT_SECRET,
+        token_cache=cache)
 
 def _build_auth_url(authority=None, scopes=None, state=None):
-    # Get the full authorization request url
-    redirect_uri = url_for('authorized', _external=True, _scheme='https')
-    app = _build_msal_app(authority=authority)
-    auth_url = app.get_authorization_request_url(
-        scopes or [], 
-        state=state or str(uuid.uuid4()), 
-        redirect_uri=redirect_uri
-    )
     # Return the full Auth Request URL with appropriate Redirect URI
-    return auth_url
+    return _build_msal_app(authority=authority).get_authorization_request_url(
+        scopes=scopes or [],
+        state=state or str(uuid.uuid4()),
+        redirect_uri=url_for('authorized', _external=True, _scheme='https')
+        )
